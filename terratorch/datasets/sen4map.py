@@ -1,5 +1,6 @@
 import numpy as np
 import h5py
+import logging
 
 import torch
 import torch.nn.functional as F
@@ -11,12 +12,15 @@ from torchvision.transforms.v2 import InterpolationMode
 
 import pickle
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("Sen4MapDataset")
 
 class Sen4MapDataset(Dataset):
     """[Sen4Map](https://gitlab.jsc.fz-juelich.de/sdlrs/sen4map-benchmark-dataset) Dataset.
 
-    Dataset intended for land-cover and crop classification tasks based on 
-    satellite data stored in HDF5 files.
+    Dataset intended for land-cover and crop classification tasks based on
+    multi-temporal satellite data stored in HDF5 files.
 
     Dataset Format:
 
@@ -112,7 +116,8 @@ class Sen4MapDataset(Dataset):
         """
         self.h5data = h5py_file_object
         if h5data_keys is None:
-            if classification_map == "crops": print(f"Crop classification task chosen but no keys supplied. Will fail unless dataset hdf5 files have been filtered. Either filter dataset files or create a filtered set of keys.")
+            if classification_map == "crops": 
+                logger.warning("Crop classification task chosen but no keys supplied. Will fail unless dataset hdf5 files have been filtered. Either filter dataset files or create a filtered set of keys.")
             self.h5data_keys = list(self.h5data.keys())
             if save_keys_path is not None:
                 with open(save_keys_path, "wb") as file:
@@ -121,12 +126,11 @@ class Sen4MapDataset(Dataset):
             self.h5data_keys = h5data_keys
         self.crop_size = crop_size
         if input_bands and not dataset_bands:
-            raise ValueError(f"input_bands was provided without specifying the dataset_bands")
-        # self.dataset_bands = dataset_bands
-        # self.input_bands = input_bands
+            raise ValueError("input_bands was provided without specifying the dataset_bands")
         if input_bands and dataset_bands:
             self.input_channels = [dataset_bands.index(band_ind) for band_ind in input_bands if band_ind in dataset_bands]
-        else: self.input_channels = None
+        else: 
+            self.input_channels = None
 
         classification_maps = {"land-cover": Sen4MapDataset.land_cover_classification_map,
                                "crops": Sen4MapDataset.crop_classification_map}
@@ -151,7 +155,7 @@ class Sen4MapDataset(Dataset):
         if self.input_channels:
             Image = Image[self.input_channels, ...]
 
-        return {"image":Image, "label":Label}
+        return {"image": Image, "label": Label}
 
     def __len__(self):
         return len(self.h5data_keys)
@@ -159,6 +163,9 @@ class Sen4MapDataset(Dataset):
     def get_data(self, im):
         mask = im['SCL'] < 9
 
+        logger.info("Starting get_data processing")
+        
+        # Apply mask and stack bands
         B2 = np.where(mask==1, im['B2'], 0)
         B3 = np.where(mask==1, im['B3'], 0)
         B4 = np.where(mask==1, im['B4'], 0)
@@ -170,34 +177,65 @@ class Sen4MapDataset(Dataset):
         B11 = np.where(mask==1, im['B11'], 0)
         B12 = np.where(mask==1, im['B12'], 0)
         
-        Image = np.stack((B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12), axis=0, dtype="float32")
-        Image = np.moveaxis(Image, [0],[1])
+        # Stack the bands and convert to torch tensor
+        Image = np.stack((B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12), axis=0, dtype="float32")
+        logger.info(f"Image stacked shape: {Image.shape}")
+        
+        Image = np.moveaxis(Image, 0, 1)
+        logger.info(f"Image after moveaxis shape: {Image.shape}")
+        
         Image = torch.from_numpy(Image)
+        logger.info(f"Image as torch tensor shape: {Image.shape}")
         
-        if self.crop_size: 
+        # Apply preprocessing operations if specified
+        if self.crop_size:
             Image = self.crop_center(Image, self.crop_size, self.crop_size)
-        
+            logger.info(f"Image after cropping shape: {Image.shape}")
+            
         if self.resize:
             Image = resize(Image, size=self.resize_to, interpolation=self.resize_interpolation, antialias=self.resize_antialiasing)
+            logger.info(f"Image after resizing shape: {Image.shape}")
 
+        # Extract and process the label
         Label = im.attrs['lc1']
         Label = self.classification_map[Label]
         Label = np.array(Label)
         Label = Label.astype('float32')
+        logger.info(f"Label: {Label}")
 
         return Image, Label
     
-    def crop_center(self, img:torch.Tensor, cropx, cropy) -> torch.Tensor:
-        c, y, x = img.shape
+    def crop_center(self, img_b:torch.Tensor, cropx, cropy) -> torch.Tensor:
+        """Crop the center portion of the image.
+        
+        Args:
+            img_b: Input tensor with shape [channels, frames, height, width]
+            cropx: Width of the crop
+            cropy: Height of the crop
+            
+        Returns:
+            Cropped tensor with shape [channels, frames, cropy, cropx]
+        """
+        channels, frames, y, x = img_b.shape
         startx = x//2-(cropx//2)
         starty = y//2-(cropy//2)    
-        return img[0:c, starty:starty+cropy, startx:startx+cropx]
+        return img_b[:, :, starty:starty+cropy, startx:startx+cropx]
 
     def min_max_normalize(self, tensor:torch.Tensor, q_low:list[float], q_hi:list[float]) -> torch.Tensor:
+        """Normalize tensor values between 0 and 1 using provided quantiles.
+        
+        Args:
+            tensor: Input tensor to normalize
+            q_low: Low quantile values for each channel
+            q_hi: High quantile values for each channel
+            
+        Returns:
+            Normalized tensor
+        """
         dtype = tensor.dtype
         q_low = torch.as_tensor(q_low, dtype=dtype, device=tensor.device)
         q_hi = torch.as_tensor(q_hi, dtype=dtype, device=tensor.device)
         x = torch.tensor(-12.0)
         y = torch.exp(x)
-        tensor.sub_(q_low[:, None, None]).div_((q_hi[:, None, None].sub_(q_low[:, None, None])).add(y))
+        tensor.sub_(q_low[:, None, None, None]).div_((q_hi[:, None, None, None].sub_(q_low[:, None, None, None])).add(y))
         return tensor

@@ -1,11 +1,16 @@
+import logging
 import lightning.pytorch as pl 
 from torchvision.transforms.v2 import InterpolationMode
 import pickle
 import h5py
 from torch.utils.data import DataLoader
 
-from terratorch.datasets import Sen4MapDataset
+# Import our modified Sen4MapDataset
+from terratorch.datasets.sen4map import Sen4MapDataset
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("Sen4MapLucasDataModule")
 
 class Sen4MapLucasDataModule(pl.LightningDataModule):
     """NonGeo LightningDataModule implementation for Sen4map."""
@@ -69,9 +74,12 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         self.test_hdf5_keys_path = test_hdf5_keys_path
         self.val_hdf5_keys_path = val_hdf5_keys_path
 
-        if train_hdf5_path and not train_hdf5_keys_path: print(f"Train dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
-        if test_hdf5_path and not test_hdf5_keys_path: print(f"Test dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
-        if val_hdf5_path and not val_hdf5_keys_path: print(f"Val dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
+        if train_hdf5_path and not train_hdf5_keys_path: 
+            logger.warning("Train dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
+        if test_hdf5_path and not test_hdf5_keys_path: 
+            logger.warning("Test dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
+        if val_hdf5_path and not val_hdf5_keys_path: 
+            logger.warning("Val dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
 
         self.train_hdf5_keys_save_path = kwargs.pop("train_hdf5_keys_save_path", None)
         self.test_hdf5_keys_save_path = kwargs.pop("test_hdf5_keys_save_path", None)
@@ -86,16 +94,22 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         self.val_data_fraction = kwargs.pop("val_data_fraction", 1.0)
         self.test_data_fraction = kwargs.pop("test_data_fraction", 1.0)
 
-        if self.train_data_fraction != 1.0  and  not train_hdf5_keys_path: raise ValueError(f"train_data_fraction provided as non-unity but train_hdf5_keys_path is unset.")
-        if self.val_data_fraction != 1.0  and  not val_hdf5_keys_path: raise ValueError(f"val_data_fraction provided as non-unity but val_hdf5_keys_path is unset.")
-        if self.test_data_fraction != 1.0  and  not test_hdf5_keys_path: raise ValueError(f"test_data_fraction provided as non-unity but test_hdf5_keys_path is unset.")
+        if self.train_data_fraction != 1.0  and  not train_hdf5_keys_path: 
+            raise ValueError("train_data_fraction provided as non-unity but train_hdf5_keys_path is unset.")
+        if self.val_data_fraction != 1.0  and  not val_hdf5_keys_path: 
+            raise ValueError("val_data_fraction provided as non-unity but val_hdf5_keys_path is unset.")
+        if self.test_data_fraction != 1.0  and  not test_hdf5_keys_path: 
+            raise ValueError("test_data_fraction provided as non-unity but test_hdf5_keys_path is unset.")
 
         all_hdf5_data_path = kwargs.pop("all_hdf5_data_path", None)
         if all_hdf5_data_path is not None:
-            print(f"all_hdf5_data_path provided, will be interpreted as the general data path for all splits.\nKeys in provided train_hdf5_keys_path assumed to encompass all keys for entire data. Validation and Test keys will be subtracted from Train keys.")
-            if self.train_hdf5_path: raise ValueError(f"Both general all_hdf5_data_path provided and a specific train_hdf5_path, remove the train_hdf5_path")
-            if self.val_hdf5_path: raise ValueError(f"Both general all_hdf5_data_path provided and a specific val_hdf5_path, remove the val_hdf5_path")
-            if self.test_hdf5_path: raise ValueError(f"Both general all_hdf5_data_path provided and a specific test_hdf5_path, remove the test_hdf5_path")
+            logger.info("all_hdf5_data_path provided, will be interpreted as the general data path for all splits.\nKeys in provided train_hdf5_keys_path assumed to encompass all keys for entire data. Validation and Test keys will be subtracted from Train keys.")
+            if self.train_hdf5_path: 
+                raise ValueError("Both general all_hdf5_data_path provided and a specific train_hdf5_path, remove the train_hdf5_path")
+            if self.val_hdf5_path: 
+                raise ValueError("Both general all_hdf5_data_path provided and a specific val_hdf5_path, remove the val_hdf5_path")
+            if self.test_hdf5_path: 
+                raise ValueError("Both general all_hdf5_data_path provided and a specific test_hdf5_path, remove the test_hdf5_path")
             self.train_hdf5_path = all_hdf5_data_path
             self.val_hdf5_path = all_hdf5_data_path
             self.test_hdf5_path = all_hdf5_data_path
@@ -106,10 +120,10 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         self.resize = kwargs.pop("resize", False)
         self.resize_to = kwargs.pop("resize_to", None)
         if self.resize and self.resize_to is None:
-            raise ValueError(f"Config provided resize as True, but resize_to parameter not given")
+            raise ValueError("Config provided resize as True, but resize_to parameter not given")
         self.resize_interpolation = kwargs.pop("resize_interpolation", None)
         if self.resize and self.resize_interpolation is None:
-            print(f"Config provided resize as True, but resize_interpolation mode not given. Will assume default bilinear")
+            logger.warning("Config provided resize as True, but resize_interpolation mode not given. Will assume default bilinear")
             self.resize_interpolation = "bilinear"
         interpolation_dict = {
             "bilinear": InterpolationMode.BILINEAR,
@@ -126,7 +140,8 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         self.kwargs = kwargs
 
     def _load_hdf5_keys_from_path(self, path, fraction=1.0):
-        if path is None: return None
+        if path is None: 
+            return None
         with open(path, "rb") as f:
             keys = pickle.load(f)
             return keys[:int(fraction*len(keys))]
@@ -137,12 +152,19 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         Args:
             stage: Either fit, test.
         """
+        logger.info(f"Setting up {stage} stage")
+        
         if stage == "fit":
             train_keys = self._load_hdf5_keys_from_path(self.train_hdf5_keys_path, fraction=self.train_data_fraction)
             val_keys = self._load_hdf5_keys_from_path(self.val_hdf5_keys_path, fraction=self.val_data_fraction)
+            
             if self.reduce_train_keys:
                 test_keys = self._load_hdf5_keys_from_path(self.test_hdf5_keys_path, fraction=self.test_data_fraction)
-                train_keys = list(set(train_keys) - set(val_keys) - set(test_keys))
+                if train_keys and val_keys and test_keys:
+                    train_keys = list(set(train_keys) - set(val_keys) - set(test_keys))
+                    logger.info(f"Reduced train keys to {len(train_keys)} after removing validation and test keys")
+            
+            logger.info(f"Opening training HDF5 file: {self.train_hdf5_path}")
             train_file = h5py.File(self.train_hdf5_path, 'r')
             self.lucasS2_train = Sen4MapDataset(
                 train_file, 
@@ -154,6 +176,9 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
                 save_keys_path = self.train_hdf5_keys_save_path,
                 **self.kwargs
             )
+            logger.info(f"Training dataset created with {len(self.lucasS2_train)} samples")
+            
+            logger.info(f"Opening validation HDF5 file: {self.val_hdf5_path}")
             val_file = h5py.File(self.val_hdf5_path, 'r')
             self.lucasS2_val = Sen4MapDataset(
                 val_file, 
@@ -165,7 +190,10 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
                 save_keys_path = self.val_hdf5_keys_save_path,
                 **self.kwargs
             )
+            logger.info(f"Validation dataset created with {len(self.lucasS2_val)} samples")
+            
         if stage == "test":
+            logger.info(f"Opening test HDF5 file: {self.test_hdf5_path}")
             test_file = h5py.File(self.test_hdf5_path, 'r')
             test_keys = self._load_hdf5_keys_from_path(self.test_hdf5_keys_path, fraction=self.test_data_fraction)
             self.lucasS2_test = Sen4MapDataset(
@@ -178,12 +206,34 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
                 save_keys_path = self.test_hdf5_keys_save_path,
                 **self.kwargs
             )
+            logger.info(f"Test dataset created with {len(self.lucasS2_test)} samples")
 
     def train_dataloader(self):
-        return DataLoader(self.lucasS2_train, batch_size=self.batch_size, num_workers=self.num_workers, prefetch_factor=self.prefetch_factor, shuffle=self.train_shuffle)
+        logger.info("Creating training dataloader")
+        return DataLoader(
+            self.lucasS2_train, 
+            batch_size=self.batch_size, 
+            num_workers=self.num_workers, 
+            prefetch_factor=self.prefetch_factor, 
+            shuffle=self.train_shuffle
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.lucasS2_val, batch_size=self.batch_size, num_workers=self.num_workers, prefetch_factor=self.prefetch_factor, shuffle=self.val_shuffle)
+        logger.info("Creating validation dataloader")
+        return DataLoader(
+            self.lucasS2_val, 
+            batch_size=self.batch_size, 
+            num_workers=self.num_workers, 
+            prefetch_factor=self.prefetch_factor, 
+            shuffle=self.val_shuffle
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.lucasS2_test, batch_size=self.batch_size, num_workers=self.num_workers, prefetch_factor=self.prefetch_factor, shuffle=self.test_shuffle)
+        logger.info("Creating test dataloader")
+        return DataLoader(
+            self.lucasS2_test, 
+            batch_size=self.batch_size, 
+            num_workers=self.num_workers, 
+            prefetch_factor=self.prefetch_factor, 
+            shuffle=self.test_shuffle
+        )
