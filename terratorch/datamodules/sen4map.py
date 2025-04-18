@@ -1,25 +1,25 @@
-import logging
 import lightning.pytorch as pl 
 from torchvision.transforms.v2 import InterpolationMode
 import pickle
 import h5py
+import logging
 from torch.utils.data import DataLoader
 
-# Import our modified Sen4MapDataset
-from terratorch.datasets.sen4map import Sen4MapDataset
+# Import our modified dataset instead of the original
+from sen4map_dataset import Sen4MapDatasetSimple
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("Sen4MapLucasDataModule")
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class Sen4MapLucasDataModule(pl.LightningDataModule):
-    """NonGeo LightningDataModule implementation for Sen4map."""
+class Sen4MapLucasSimpleDataModule(pl.LightningDataModule):
+    """NonGeo LightningDataModule implementation for Sen4map without monthly composites."""
 
     def __init__(
             self, 
             batch_size,
             num_workers,
-            prefetch_factor = 0,
+            prefetch_factor = None,
             train_hdf5_path = None,
             train_hdf5_keys_path = None,
             test_hdf5_path = None,
@@ -29,12 +29,12 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
             **kwargs
             ):
         """
-        Initializes the Sen4MapLucasDataModule for handling Sen4Map data.
+        Initializes the Sen4MapLucasSimpleDataModule for handling Sen4Map data without monthly composites.
 
         Args:
             batch_size (int): Batch size for DataLoaders.
             num_workers (int): Number of worker processes for data loading.
-            prefetch_factor (int, optional): Number of samples to prefetch per worker. Defaults to 0.
+            prefetch_factor (int, optional): Number of samples to prefetch per worker. Defaults to None.
             train_hdf5_path (str, optional): Path to the training HDF5 file.
             train_hdf5_keys_path (str, optional): Path to the training HDF5 keys file.
             test_hdf5_path (str, optional): Path to the testing HDF5 file.
@@ -58,6 +58,7 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
             resize_antialiasing (bool, optional): Whether to apply antialiasing during resizing. Defaults to True.
             **kwargs: Additional keyword arguments.
         """
+        super().__init__()
         self.prepare_data_per_node = False
         self._log_hyperparams = None
         self.allow_zero_length_dataloader_with_multiple_devices = False
@@ -75,11 +76,11 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         self.val_hdf5_keys_path = val_hdf5_keys_path
 
         if train_hdf5_path and not train_hdf5_keys_path: 
-            logger.warning("Train dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
+            logger.warning("Train dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.", stacklevel=2)
         if test_hdf5_path and not test_hdf5_keys_path: 
-            logger.warning("Test dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
+            logger.warning("Test dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.", stacklevel=2)
         if val_hdf5_path and not val_hdf5_keys_path: 
-            logger.warning("Val dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.")
+            logger.warning("Val dataset path provided but not the path to the dataset keys. Generating the keys might take a few minutes.", stacklevel=2)
 
         self.train_hdf5_keys_save_path = kwargs.pop("train_hdf5_keys_save_path", None)
         self.test_hdf5_keys_save_path = kwargs.pop("test_hdf5_keys_save_path", None)
@@ -103,7 +104,7 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
 
         all_hdf5_data_path = kwargs.pop("all_hdf5_data_path", None)
         if all_hdf5_data_path is not None:
-            logger.info("all_hdf5_data_path provided, will be interpreted as the general data path for all splits.\nKeys in provided train_hdf5_keys_path assumed to encompass all keys for entire data. Validation and Test keys will be subtracted from Train keys.")
+            logger.info("all_hdf5_data_path provided, will be interpreted as the general data path for all splits. Keys in provided train_hdf5_keys_path assumed to encompass all keys for entire data. Validation and Test keys will be subtracted from Train keys.", stacklevel=2)
             if self.train_hdf5_path: 
                 raise ValueError("Both general all_hdf5_data_path provided and a specific train_hdf5_path, remove the train_hdf5_path")
             if self.val_hdf5_path: 
@@ -123,7 +124,7 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
             raise ValueError("Config provided resize as True, but resize_to parameter not given")
         self.resize_interpolation = kwargs.pop("resize_interpolation", None)
         if self.resize and self.resize_interpolation is None:
-            logger.warning("Config provided resize as True, but resize_interpolation mode not given. Will assume default bilinear")
+            logger.warning("Config provided resize as True, but resize_interpolation mode not given. Will assume default bilinear", stacklevel=2)
             self.resize_interpolation = "bilinear"
         interpolation_dict = {
             "bilinear": InterpolationMode.BILINEAR,
@@ -133,83 +134,121 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         }
         if self.resize:
             if self.resize_interpolation not in interpolation_dict.keys():
-                raise ValueError(f"resize_interpolation provided as {self.resize_interpolation}, but valid options are: {interpolation_dict.keys()}")
+                raise ValueError(f"resize_interpolation provided as {self.resize_interpolation}, but valid options are: {list(interpolation_dict.keys())}")
             self.resize_interpolation = interpolation_dict[self.resize_interpolation]
         self.resize_antialiasing = kwargs.pop("resize_antialiasing", True)
 
         self.kwargs = kwargs
 
     def _load_hdf5_keys_from_path(self, path, fraction=1.0):
+        """Load keys from a pickle file.
+        
+        Args:
+            path: Path to the pickle file containing keys
+            fraction: Fraction of keys to use
+            
+        Returns:
+            List of keys or None if path is None
+        """
         if path is None: 
             return None
-        with open(path, "rb") as f:
-            keys = pickle.load(f)
-            return keys[:int(fraction*len(keys))]
+        try:
+            with open(path, "rb") as f:
+                keys = pickle.load(f)
+                selected_keys = keys[:int(fraction*len(keys))]
+                logger.info(f"Loaded {len(selected_keys)} keys from {path} (fraction={fraction})", stacklevel=2)
+                return selected_keys
+        except Exception as e:
+            logger.error(f"Error loading keys from {path}: {e}", stacklevel=2)
+            return None
 
     def setup(self, stage: str):
-        """Set up datasets.
+        """Set up datasets for training, validation, or testing.
 
         Args:
-            stage: Either fit, test.
+            stage: Either 'fit', 'validate', or 'test'.
         """
-        logger.info(f"Setting up {stage} stage")
+        logger.info(f"Setting up datasets for stage: {stage}", stacklevel=2)
         
         if stage == "fit":
+            # Load keys
             train_keys = self._load_hdf5_keys_from_path(self.train_hdf5_keys_path, fraction=self.train_data_fraction)
             val_keys = self._load_hdf5_keys_from_path(self.val_hdf5_keys_path, fraction=self.val_data_fraction)
             
+            # If using a single HDF5 file for all splits, remove validation and test keys from training
             if self.reduce_train_keys:
                 test_keys = self._load_hdf5_keys_from_path(self.test_hdf5_keys_path, fraction=self.test_data_fraction)
-                if train_keys and val_keys and test_keys:
-                    train_keys = list(set(train_keys) - set(val_keys) - set(test_keys))
-                    logger.info(f"Reduced train keys to {len(train_keys)} after removing validation and test keys")
+                if train_keys and (val_keys or test_keys):
+                    original_train_count = len(train_keys)
+                    train_keys = list(set(train_keys) - set(val_keys or []) - set(test_keys or []))
+                    logger.info(f"Reduced train keys from {original_train_count} to {len(train_keys)}", stacklevel=2)
             
-            logger.info(f"Opening training HDF5 file: {self.train_hdf5_path}")
-            train_file = h5py.File(self.train_hdf5_path, 'r')
-            self.lucasS2_train = Sen4MapDataset(
-                train_file, 
-                h5data_keys = train_keys, 
-                resize = self.resize,
-                resize_to = self.resize_to,
-                resize_interpolation = self.resize_interpolation,
-                resize_antialiasing = self.resize_antialiasing,
-                save_keys_path = self.train_hdf5_keys_save_path,
-                **self.kwargs
-            )
-            logger.info(f"Training dataset created with {len(self.lucasS2_train)} samples")
+            # Create training dataset
+            try:
+                logger.info(f"Opening training HDF5 file: {self.train_hdf5_path}", stacklevel=2)
+                train_file = h5py.File(self.train_hdf5_path, 'r')
+                self.lucasS2_train = Sen4MapDatasetSimple(
+                    train_file, 
+                    h5data_keys=train_keys, 
+                    resize=self.resize,
+                    resize_to=self.resize_to,
+                    resize_interpolation=self.resize_interpolation,
+                    resize_antialiasing=self.resize_antialiasing,
+                    save_keys_path=self.train_hdf5_keys_save_path,
+                    **self.kwargs
+                )
+                logger.info(f"Created training dataset with {len(self.lucasS2_train)} samples", stacklevel=2)
+            except Exception as e:
+                logger.error(f"Error creating training dataset: {e}", stacklevel=2)
+                raise
             
-            logger.info(f"Opening validation HDF5 file: {self.val_hdf5_path}")
-            val_file = h5py.File(self.val_hdf5_path, 'r')
-            self.lucasS2_val = Sen4MapDataset(
-                val_file, 
-                h5data_keys=val_keys, 
-                resize = self.resize,
-                resize_to = self.resize_to,
-                resize_interpolation = self.resize_interpolation,
-                resize_antialiasing = self.resize_antialiasing,
-                save_keys_path = self.val_hdf5_keys_save_path,
-                **self.kwargs
-            )
-            logger.info(f"Validation dataset created with {len(self.lucasS2_val)} samples")
-            
-        if stage == "test":
-            logger.info(f"Opening test HDF5 file: {self.test_hdf5_path}")
-            test_file = h5py.File(self.test_hdf5_path, 'r')
-            test_keys = self._load_hdf5_keys_from_path(self.test_hdf5_keys_path, fraction=self.test_data_fraction)
-            self.lucasS2_test = Sen4MapDataset(
-                test_file, 
-                h5data_keys=test_keys, 
-                resize = self.resize,
-                resize_to = self.resize_to,
-                resize_interpolation = self.resize_interpolation,
-                resize_antialiasing = self.resize_antialiasing,
-                save_keys_path = self.test_hdf5_keys_save_path,
-                **self.kwargs
-            )
-            logger.info(f"Test dataset created with {len(self.lucasS2_test)} samples")
+            # Create validation dataset
+            try:
+                logger.info(f"Opening validation HDF5 file: {self.val_hdf5_path}", stacklevel=2)
+                val_file = h5py.File(self.val_hdf5_path, 'r')
+                self.lucasS2_val = Sen4MapDatasetSimple(
+                    val_file, 
+                    h5data_keys=val_keys, 
+                    resize=self.resize,
+                    resize_to=self.resize_to,
+                    resize_interpolation=self.resize_interpolation,
+                    resize_antialiasing=self.resize_antialiasing,
+                    save_keys_path=self.val_hdf5_keys_save_path,
+                    **self.kwargs
+                )
+                logger.info(f"Created validation dataset with {len(self.lucasS2_val)} samples", stacklevel=2)
+            except Exception as e:
+                logger.error(f"Error creating validation dataset: {e}", stacklevel=2)
+                raise
+                
+        if stage == "test" or stage == "predict":
+            # Create test dataset
+            try:
+                logger.info(f"Opening test HDF5 file: {self.test_hdf5_path}", stacklevel=2)
+                test_file = h5py.File(self.test_hdf5_path, 'r')
+                test_keys = self._load_hdf5_keys_from_path(self.test_hdf5_keys_path, fraction=self.test_data_fraction)
+                self.lucasS2_test = Sen4MapDatasetSimple(
+                    test_file, 
+                    h5data_keys=test_keys, 
+                    resize=self.resize,
+                    resize_to=self.resize_to,
+                    resize_interpolation=self.resize_interpolation,
+                    resize_antialiasing=self.resize_antialiasing,
+                    save_keys_path=self.test_hdf5_keys_save_path,
+                    **self.kwargs
+                )
+                logger.info(f"Created test dataset with {len(self.lucasS2_test)} samples", stacklevel=2)
+            except Exception as e:
+                logger.error(f"Error creating test dataset: {e}", stacklevel=2)
+                raise
 
     def train_dataloader(self):
-        logger.info("Creating training dataloader")
+        """Return the training dataloader.
+        
+        Returns:
+            DataLoader: The training dataloader
+        """
+        logger.info(f"Creating training dataloader with batch_size={self.batch_size}, num_workers={self.num_workers}", stacklevel=2)
         return DataLoader(
             self.lucasS2_train, 
             batch_size=self.batch_size, 
@@ -219,7 +258,12 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
-        logger.info("Creating validation dataloader")
+        """Return the validation dataloader.
+        
+        Returns:
+            DataLoader: The validation dataloader
+        """
+        logger.info(f"Creating validation dataloader with batch_size={self.batch_size}, num_workers={self.num_workers}", stacklevel=2)
         return DataLoader(
             self.lucasS2_val, 
             batch_size=self.batch_size, 
@@ -229,7 +273,12 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         )
 
     def test_dataloader(self):
-        logger.info("Creating test dataloader")
+        """Return the test dataloader.
+        
+        Returns:
+            DataLoader: The test dataloader
+        """
+        logger.info(f"Creating test dataloader with batch_size={self.batch_size}, num_workers={self.num_workers}", stacklevel=2)
         return DataLoader(
             self.lucasS2_test, 
             batch_size=self.batch_size, 
