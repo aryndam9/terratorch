@@ -12,7 +12,7 @@ from torchvision.transforms.v2 import InterpolationMode
 import pickle
 
 
-class Sen4MapDatasetMonthlyComposites(Dataset):
+class Sen4MapDataset(Dataset):
     """[Sen4Map](https://gitlab.jsc.fz-juelich.de/sdlrs/sen4map-benchmark-dataset) Dataset for Monthly Composites.
 
     Dataset intended for land-cover and crop classification tasks based on monthly composites
@@ -91,7 +91,7 @@ class Sen4MapDatasetMonthlyComposites(Dataset):
             save_keys_path = None,
             classification_map = "land-cover"
             ):
-        """Initialize a new instance of Sen4MapDatasetMonthlyComposites.
+        """Initialize a new instance of Sen4MapDataset.
 
         This dataset loads data from an HDF5 file object containing multi-temporal satellite data and computes
         monthly composite images by aggregating acquisitions (via median).
@@ -136,8 +136,8 @@ class Sen4MapDatasetMonthlyComposites(Dataset):
             self.input_channels = [dataset_bands.index(band_ind) for band_ind in input_bands if band_ind in dataset_bands]
         else: self.input_channels = None
 
-        classification_maps = {"land-cover": Sen4MapDatasetMonthlyComposites.land_cover_classification_map,
-                               "crops": Sen4MapDatasetMonthlyComposites.crop_classification_map}
+        classification_maps = {"land-cover": Sen4MapDataset.land_cover_classification_map,
+                               "crops": Sen4MapDataset.crop_classification_map}
         if classification_map not in classification_maps.keys():
             raise ValueError(f"Provided classification_map of: {classification_map}, is not from the list of valid ones: {classification_maps}")
         self.classification_map = classification_maps[classification_map]
@@ -169,7 +169,6 @@ class Sen4MapDatasetMonthlyComposites(Dataset):
 
     def get_data(self, im):
         mask = im['SCL'] < 9
-
         B2= np.where(mask==1, im['B2'], 0)
         B3= np.where(mask==1, im['B3'], 0)
         B4= np.where(mask==1, im['B4'], 0)
@@ -181,44 +180,8 @@ class Sen4MapDatasetMonthlyComposites(Dataset):
         B11= np.where(mask==1, im['B11'], 0)
         B12= np.where(mask==1, im['B12'], 0)
         Image = np.stack((B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12), axis=0, dtype="float32")
-        Image = np.moveaxis(Image, [0],[1])
         Image = torch.from_numpy(Image)
         
-        # Composites:
-        n1= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201801' in s]
-        n2= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201802' in s]
-        n3= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201803' in s]
-        n4= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201804' in s]
-        n5= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201805' in s]
-        n6= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201806' in s]
-        n7= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201807' in s]
-        n8= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201808' in s]
-        n9= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201809' in s]
-        n10= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201810' in s]
-        n11= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201811' in s]
-        n12= [i for i, s in enumerate(im.attrs['Image_ID'].tolist()) if '201812' in s]
-
-
-        Jan= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n1 else n1
-        Feb= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n2 else n2
-        Mar= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n3 else n3
-        Apr= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n4 else n4
-        May= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n5 else n5
-        Jun= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n6 else n6
-        Jul= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n7 else n7
-        Aug= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n8 else n8
-        Sep= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n9 else n9
-        Oct= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n10 else n10
-        Nov= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n11 else n11
-        Dec= n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11 + n12 if not n12 else n12
-
-        month_indices = [Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec]
-
-        month_medians = [torch.stack([Image[month_indices[i][j]] for j in range(len(month_indices[i]))]).median(dim=0).values for i in range(12)]
-        
-
-        Image = torch.stack(month_medians, dim=0)
-        Image = torch.moveaxis(Image, 0, 1)
         
         if self.crop_size: Image = self.crop_center(Image, self.crop_size, self.crop_size)
         if self.reverse_tile:

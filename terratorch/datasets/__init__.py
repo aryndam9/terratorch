@@ -57,7 +57,7 @@ from terratorch.datasets.wsf import WSF2019, WSFEvolution
 from terratorch.datasets.openearthmap import OpenEarthMapNonGeo
 
 # Generic Classification Dataset
-from terratorch.datasets.sen4map import Sen4MapDatasetMonthlyComposites
+from terratorch.datasets.sen4map import Sen4MapDataset
 
 
 __all__ = (
@@ -80,7 +80,7 @@ __all__ = (
     "FireScarsSegmentationMask",
     "Sen1Floods11NonGeo",
     "MultiTemporalCropClassification",
-    "Sen4MapDatasetMonthlyComposites",
+    "Sen4MapDataset",
     "HLSBands",
     "MEuroSATNonGeo",
     "MBigEarthNonGeo",
