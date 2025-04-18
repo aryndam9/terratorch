@@ -4,7 +4,7 @@ import pickle
 import h5py
 from torch.utils.data import DataLoader
 
-from terratorch.datasets import Sen4MapDatasetMonthlyComposites
+from terratorch.datasets import Sen4MapDataset
 
 
 class Sen4MapLucasDataModule(pl.LightningDataModule):
@@ -146,7 +146,7 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
                 test_keys = self._load_hdf5_keys_from_path(self.test_hdf5_keys_path, fraction=self.test_data_fraction)
                 train_keys = list(set(train_keys) - set(val_keys) - set(test_keys))
             train_file = h5py.File(self.train_hdf5_path, 'r')
-            self.lucasS2_train = Sen4MapDatasetMonthlyComposites(
+            self.lucasS2_train = Sen4MapDataset(
                 train_file, 
                 h5data_keys = train_keys, 
                 resize = self.resize,
@@ -157,7 +157,7 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
                 **self.kwargs
             )
             val_file = h5py.File(self.val_hdf5_path, 'r')
-            self.lucasS2_val = Sen4MapDatasetMonthlyComposites(
+            self.lucasS2_val = Sen4MapDataset(
                 val_file, 
                 h5data_keys=val_keys, 
                 resize = self.resize,
@@ -170,7 +170,7 @@ class Sen4MapLucasDataModule(pl.LightningDataModule):
         if stage == "test":
             test_file = h5py.File(self.test_hdf5_path, 'r')
             test_keys = self._load_hdf5_keys_from_path(self.test_hdf5_keys_path, fraction=self.test_data_fraction)
-            self.lucasS2_test = Sen4MapDatasetMonthlyComposites(
+            self.lucasS2_test = Sen4MapDataset(
                 test_file, 
                 h5data_keys=test_keys, 
                 resize = self.resize,

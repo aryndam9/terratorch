@@ -12,7 +12,7 @@ from torchvision.transforms.v2 import InterpolationMode
 import pickle
 
 
-class Sen4MapDatasetMonthlyComposites(Dataset):
+class Sen4MapDataset(Dataset):
     """[Sen4Map](https://gitlab.jsc.fz-juelich.de/sdlrs/sen4map-benchmark-dataset) Dataset for Monthly Composites.
 
     Dataset intended for land-cover and crop classification tasks based on monthly composites
@@ -91,7 +91,7 @@ class Sen4MapDatasetMonthlyComposites(Dataset):
             save_keys_path = None,
             classification_map = "land-cover"
             ):
-        """Initialize a new instance of Sen4MapDatasetMonthlyComposites.
+        """Initialize a new instance of Sen4MapDataset.
 
         This dataset loads data from an HDF5 file object containing multi-temporal satellite data and computes
         monthly composite images by aggregating acquisitions (via median).
@@ -136,8 +136,8 @@ class Sen4MapDatasetMonthlyComposites(Dataset):
             self.input_channels = [dataset_bands.index(band_ind) for band_ind in input_bands if band_ind in dataset_bands]
         else: self.input_channels = None
 
-        classification_maps = {"land-cover": Sen4MapDatasetMonthlyComposites.land_cover_classification_map,
-                               "crops": Sen4MapDatasetMonthlyComposites.crop_classification_map}
+        classification_maps = {"land-cover": Sen4MapDataset.land_cover_classification_map,
+                               "crops": Sen4MapDataset.crop_classification_map}
         if classification_map not in classification_maps.keys():
             raise ValueError(f"Provided classification_map of: {classification_map}, is not from the list of valid ones: {classification_maps}")
         self.classification_map = classification_maps[classification_map]
